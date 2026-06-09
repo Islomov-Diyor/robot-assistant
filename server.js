@@ -25,6 +25,13 @@ app.use(expressLayouts);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'PoseAI Robot-assistant'
+  });
+});
+
 app.get('/', (req, res) => {
   res.render('index', {
     title: 'Bosh sahifa',
