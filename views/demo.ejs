@@ -1,0 +1,261 @@
+<section class="px-4 py-10 sm:px-6 lg:px-8">
+  <div class="mx-auto max-w-7xl">
+    <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-bold uppercase tracking-[0.25em] text-cyan-200">Jonli demo</p>
+        <h1 class="mt-2 text-4xl font-black sm:text-5xl"><span class="gradient-text">Holatni aniqlash paneli</span></h1>
+      </div>
+      <button id="cameraToggle" class="gradient-btn rounded-full px-6 py-3 font-black text-white transition">
+        Kamera Yoqish
+      </button>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-[3fr_2fr]">
+      <section class="glass rounded-[8px] p-4">
+        <div class="relative aspect-video overflow-hidden rounded-[8px] bg-black/50 ring-1 ring-cyan-300/20">
+          <video id="inputVideo" class="h-full w-full object-cover" autoplay playsinline muted></video>
+          <canvas id="outputCanvas" class="absolute inset-0 h-full w-full"></canvas>
+          <div id="cameraHint" class="absolute inset-0 flex items-center justify-center bg-[#0f0f1a]/70 text-center text-slate-200">
+            <div>
+              <div class="robot-bob mb-4 text-6xl">🤖</div>
+              <p class="font-bold">Kamerani yoqing va holatingizni tekshiring</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="glass rounded-[8px] p-6">
+        <div class="text-center">
+          <div class="robot-bob mx-auto text-7xl">🤖</div>
+          <p class="mt-3 text-sm font-bold uppercase tracking-[0.22em] text-cyan-200">Robot-assistent</p>
+        </div>
+
+        <div class="mt-8 rounded-[8px] border border-cyan-300/20 bg-white/5 p-5 text-center">
+          <p class="text-sm text-slate-300">Aniqlangan holat</p>
+          <p id="poseLabel" class="mt-2 text-4xl font-black gradient-text">Kutilmoqda</p>
+        </div>
+
+        <div class="mt-5 rounded-[8px] border border-white/10 bg-[#0f0f1a]/60 p-5">
+          <p class="mb-2 text-sm font-bold text-cyan-200">Assistent xabari</p>
+          <p id="adviceText" class="min-h-16 text-lg font-semibold leading-7 text-white">Kamera ishga tushirilgach tavsiya ko'rsatiladi.</p>
+        </div>
+
+        <div class="mt-5 grid grid-cols-2 gap-4">
+          <div class="rounded-[8px] border border-white/10 bg-white/5 p-4">
+            <p class="text-sm text-slate-300">Davomiylik</p>
+            <p id="timerText" class="mt-1 text-2xl font-black">0 soniya</p>
+          </div>
+          <div class="rounded-[8px] border border-white/10 bg-white/5 p-4">
+            <p class="text-sm text-slate-300">Holat</p>
+            <p id="statusText" class="mt-1 text-2xl font-black text-cyan-200">Tayyor</p>
+          </div>
+        </div>
+
+        <button id="saveResult" class="mt-6 w-full rounded-full border border-cyan-300/40 bg-cyan-300/10 px-6 py-3 font-black text-cyan-100 transition hover:bg-cyan-300/20">
+          Natijani Saqlash
+        </button>
+        <p id="saveMessage" class="mt-3 min-h-6 text-center text-sm font-semibold text-slate-300"></p>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+
+<script>
+  const videoElement = document.getElementById('inputVideo');
+  const canvasElement = document.getElementById('outputCanvas');
+  const canvasCtx = canvasElement.getContext('2d');
+  const cameraToggle = document.getElementById('cameraToggle');
+  const cameraHint = document.getElementById('cameraHint');
+  const poseLabel = document.getElementById('poseLabel');
+  const adviceText = document.getElementById('adviceText');
+  const timerText = document.getElementById('timerText');
+  const statusText = document.getElementById('statusText');
+  const saveResult = document.getElementById('saveResult');
+  const saveMessage = document.getElementById('saveMessage');
+
+  const adviceMap = {
+    "Turgan": "Ajoyib! Siz faol holatdasiz.",
+    "O'tirgan": "Diqqat! Uzoq o'tirmang, har 30 daqiqada turing.",
+    "Yiqilgan": "XAVF! Yiqilish aniqlandi! Yordam kerakmi?",
+    "Yurmoqda": "Zo'r! Harakat sog'liq uchun foydali."
+  };
+
+  let camera = null;
+  let cameraActive = false;
+  let currentPose = 'Kutilmoqda';
+  let poseStartTime = Date.now();
+  let heldSeconds = 0;
+  let previousKneeDelta = 0;
+  let movementScore = 0;
+
+  const pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.55,
+    minTrackingConfidence: 0.55
+  });
+
+  pose.onResults(onResults);
+
+  function averageY(points) {
+    return points.reduce((sum, point) => sum + point.y, 0) / points.length;
+  }
+
+  function classifyPose(landmarks) {
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+    const leftHip = landmarks[23];
+    const rightHip = landmarks[24];
+    const leftKnee = landmarks[25];
+    const rightKnee = landmarks[26];
+    const leftAnkle = landmarks[27];
+    const rightAnkle = landmarks[28];
+
+    const shoulderY = averageY([leftShoulder, rightShoulder]);
+    const hipY = averageY([leftHip, rightHip]);
+    const kneeY = averageY([leftKnee, rightKnee]);
+    const ankleY = averageY([leftAnkle, rightAnkle]);
+    const hipKneeGap = Math.abs(hipY - kneeY);
+    const shoulderHipGap = Math.abs(shoulderY - hipY);
+    const kneeDelta = Math.abs(leftKnee.y - rightKnee.y);
+
+    movementScore = Math.abs(kneeDelta - previousKneeDelta) > 0.018 ? movementScore + 1 : Math.max(0, movementScore - 1);
+    previousKneeDelta = kneeDelta;
+
+    if (movementScore > 6) {
+      return 'Yurmoqda';
+    }
+
+    if (shoulderHipGap < 0.08 && hipKneeGap < 0.16) {
+      return 'Yiqilgan';
+    }
+
+    if (hipKneeGap < 0.12) {
+      return "O'tirgan";
+    }
+
+    if (shoulderY < hipY && hipY < kneeY && kneeY < ankleY) {
+      return 'Turgan';
+    }
+
+    return currentPose === 'Kutilmoqda' ? 'Turgan' : currentPose;
+  }
+
+  function setCurrentPose(nextPose) {
+    if (nextPose !== currentPose) {
+      currentPose = nextPose;
+      poseStartTime = Date.now();
+      heldSeconds = 0;
+    }
+
+    poseLabel.textContent = currentPose;
+    adviceText.textContent = adviceMap[currentPose] || "Holat kuzatilmoqda.";
+  }
+
+  function onResults(results) {
+    canvasElement.width = videoElement.videoWidth || canvasElement.clientWidth;
+    canvasElement.height = videoElement.videoHeight || canvasElement.clientHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.poseLandmarks) {
+      drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00d4ff', lineWidth: 4 });
+      drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#7b2ff7', lineWidth: 2, radius: 4 });
+      setCurrentPose(classifyPose(results.poseLandmarks));
+      statusText.textContent = 'Aniqlanmoqda';
+    } else {
+      statusText.textContent = 'Kutilmoqda';
+    }
+
+    canvasCtx.restore();
+  }
+
+  setInterval(() => {
+    if (!cameraActive || currentPose === 'Kutilmoqda') {
+      return;
+    }
+
+    heldSeconds = Math.floor((Date.now() - poseStartTime) / 1000);
+    timerText.textContent = `${heldSeconds} soniya`;
+  }, 1000);
+
+  async function startCamera() {
+    camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await pose.send({ image: videoElement });
+      },
+      width: 1280,
+      height: 720
+    });
+
+    await camera.start();
+    cameraActive = true;
+    cameraHint.classList.add('hidden');
+    cameraToggle.textContent = "Kamera O'chirish";
+    statusText.textContent = 'Ishlamoqda';
+    saveMessage.textContent = '';
+  }
+
+  function stopCamera() {
+    const stream = videoElement.srcObject;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      videoElement.srcObject = null;
+    }
+
+    cameraActive = false;
+    camera = null;
+    cameraHint.classList.remove('hidden');
+    cameraToggle.textContent = 'Kamera Yoqish';
+    statusText.textContent = "To'xtadi";
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+  }
+
+  cameraToggle.addEventListener('click', async () => {
+    try {
+      if (cameraActive) {
+        stopCamera();
+      } else {
+        await startCamera();
+      }
+    } catch (error) {
+      saveMessage.textContent = "Kamerani yoqib bo'lmadi. Ruxsatni tekshiring.";
+    }
+  });
+
+  saveResult.addEventListener('click', async () => {
+    if (currentPose === 'Kutilmoqda') {
+      saveMessage.textContent = 'Avval holat aniqlanishini kuting.';
+      return;
+    }
+
+    saveMessage.textContent = 'Saqlanmoqda...';
+
+    try {
+      const response = await fetch('/results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pose: currentPose,
+          duration: heldSeconds,
+          advice: adviceMap[currentPose],
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      const data = await response.json();
+      saveMessage.textContent = data.ok ? 'Natija muvaffaqiyatli saqlandi.' : data.message;
+    } catch (error) {
+      saveMessage.textContent = "Server bilan aloqa vaqtida xatolik yuz berdi.";
+    }
+  });
+</script>
