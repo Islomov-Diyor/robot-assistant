@@ -2,6 +2,8 @@
 
 AI yordamchi robot-assistant uchun inson holatini aniqlash web tizimi. Ilova Node.js, Express, MongoDB, Mongoose, EJS, Tailwind CSS CDN va MediaPipe Pose CDN asosida ishlaydi.
 
+[![Renderga joylash](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Islomov-Diyor/robot-assistant)
+
 ## Imkoniyatlar
 
 - Bosh sahifa: futuristik hero, CTA va imkoniyat kartalari
